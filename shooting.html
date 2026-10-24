@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Shooting</title>
+<style>
+  body { margin: 0; background: #111; display: flex; justify-content: center; align-items: center; height: 100vh; }
+  canvas { background: #000; }
+</style>
+</head>
+<body>
+<canvas id="c" width="400" height="600"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+// ブラウザの自動再生制限があるため、最初のキー入力で AudioContext を作る
+let audio;
+function playHit(freq) {
+  if (!audio) return;
+  const osc = audio.createOscillator();
+  const gain = audio.createGain();
+  const t = audio.currentTime;
+  osc.type = 'square';
+  osc.frequency.setValueAtTime(freq, t);
+  osc.frequency.exponentialRampToValueAtTime(freq / 4, t + 0.15);
+  gain.gain.setValueAtTime(0.2, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+  osc.connect(gain).connect(audio.destination);
+  osc.start(t);
+  osc.stop(t + 0.15);
+}
+
+const keys = {};
+addEventListener('keydown', e => {
+  if (!audio) audio = new AudioContext();
+  keys[e.code] = true;
+  if (['Space', 'ArrowLeft', 'ArrowRight', 'ArrowDown', 'ArrowUp'].includes(e.code)) e.preventDefault();
+  if (e.code === 'KeyR' && state.over) reset();
+});
+addEventListener('keyup', e => { keys[e.code] = false; });
+
+let state;
+function reset() {
+  state = {
+    player: { x: W / 2 - 20, y: H - 60, w: 40, h: 40, hp: 5, maxHp: 5, form: 1, chargeStart: 0 },
+    enemy: { x: W / 2 - 35, y: 30, w: 70, h: 64, hp: 20, maxHp: 20, form: 1, vx: 2, turnTimer: 0, barrierUntil: 0 },
+    playerBeams: [],
+    enemyBeams: [],
+    over: null,
+  };
+}
+
+const CHARGE_MS = 1000;
+const CHARGE_DAMAGE = 5;
+function isCharged(p) {
+  return p.chargeStart && performance.now() - p.chargeStart >= CHARGE_MS;
+}
+
+const SPECIAL_DAMAGE = 10;
+const SPECIAL_HP = 3;
+function canSpecial(p) {
+  return !p.specialUsed && p.hp <= SPECIAL_HP;
+}
+
+const BARRIER_R = 30;
+const ENEMY_BARRIER_R = 46;
+const ENEMY_BARRIER_MS = 3000;
+const ENEMY_REFLECT_DAMAGE = 3;
+function barrierBox(u, r) {
+  const cx = u.x + u.w / 2, cy = u.y + u.h / 2;
+  return { x: cx - r, y: cy - r, w: r * 2, h: r * 2 };
+}
+function enemyBarrierActive(e) {
+  return performance.now() < e.barrierUntil;
+}
+function reflect(b, dmg) {
+  return { x: b.x, y: b.y, w: b.w, h: b.h, vy: -b.vy, dmg, reflected: true };
+}
+
+function hit(b, t) {
+  return b.x < t.x + t.w && b.x + b.w > t.x && b.y < t.y + t.h && b.y + b.h > t.y;
+}
+
+function update() {
+  const { player: p, enemy: e } = state;
+  if (state.over) return;
+
+  if (keys.ArrowLeft) p.x -= 5;
+  if (keys.ArrowRight) p.x += 5;
+  p.x = Math.max(0, Math.min(W - p.w, p.x));
+
+  // バリア解除時に Space 押しっぱなしで暴発しないよう、押した瞬間だけを発射の契機にする
+  const spacePressed = keys.Space && !p.spacePrev;
+  p.spacePrev = keys.Space;
+  p.barrier = !!keys.ArrowDown;
+  const upPressed = keys.ArrowUp && !p.upPrev;
+  p.upPrev = keys.ArrowUp;
+  if (p.barrier) {
+    p.chargeStart = 0;
+  } else {
+    if (upPressed && canSpecial(p)) {
+      state.playerBeams.push({ x: p.x + p.w / 2 - 12, y: p.y - 60, w: 24, h: 60, vy: -12, dmg: SPECIAL_DAMAGE, special: true });
+      p.specialUsed = true;
+      playHit(300);
+    }
+    // 押した瞬間に通常弾、押し続けて離したらチャージ弾
+    if (spacePressed) {
+      state.playerBeams.push({ x: p.x + p.w / 2 - 2, y: p.y - 12, w: 4, h: 12, vy: -8, dmg: 1 });
+      p.chargeStart = performance.now();
+    }
+    if (!keys.Space && p.chargeStart) {
+      if (isCharged(p)) {
+        state.playerBeams.push({ x: p.x + p.w / 2 - 7, y: p.y - 28, w: 14, h: 28, vy: -10, dmg: CHARGE_DAMAGE });
+      }
+      p.chargeStart = 0;
+    }
+  }
+
+  // 敵: 一定間隔でランダムに向き・速度を変える
+  if (--e.turnTimer <= 0) {
+    e.vx = (Math.random() * 4 + 1) * (Math.random() < 0.5 ? -1 : 1);
+    e.turnTimer = 30 + Math.random() * 60;
+  }
+  e.x += e.vx;
+  if (e.x < 0 || e.x > W - e.w) { e.vx *= -1; e.x = Math.max(0, Math.min(W - e.w, e.x)); }
+  if (Math.random() < 0.02) {
+    state.enemyBeams.push({ x: e.x + e.w / 2 - 2, y: e.y + e.h, w: 4, h: 12, vy: 5, dmg: 1 });
+  }
+  if (e.form === 3 && !enemyBarrierActive(e) && Math.random() < 0.005) {
+    e.barrierUntil = performance.now() + ENEMY_BARRIER_MS;
+  }
+
+  for (const b of state.playerBeams) b.y += b.vy;
+  for (const b of state.enemyBeams) b.y += b.vy;
+
+  state.playerBeams = state.playerBeams.filter(b => {
+    if (!b.special && enemyBarrierActive(e) && hit(b, barrierBox(e, ENEMY_BARRIER_R))) {
+      state.enemyBeams.push(reflect(b, ENEMY_REFLECT_DAMAGE));
+      playHit(1200);
+      return false;
+    }
+    if (hit(b, e)) { e.hp -= b.dmg; playHit(b.dmg > 1 ? 500 : 800); return false; }
+    return b.y + b.h > 0;
+  });
+  state.enemyBeams = state.enemyBeams.filter(b => {
+    if (p.barrier && hit(b, barrierBox(p, BARRIER_R))) {
+      state.playerBeams.push(reflect(b, 1));
+      playHit(1200);
+      return false;
+    }
+    if (hit(b, p)) { p.hp -= b.dmg; playHit(200); return false; }
+    return b.y < H;
+  });
+
+  if (e.hp <= 0) {
+    if (e.form < 3) {
+      e.form++;
+      e.maxHp += 5;
+      e.hp = e.maxHp;
+      state.enemyBeams = [];
+    } else {
+      state.over = 'YOU WIN';
+    }
+  } else if (p.hp <= 0) {
+    if (p.form < 3) {
+      p.form++;
+      p.hp = p.maxHp;
+      state.enemyBeams = [];
+    } else {
+      state.over = 'GAME OVER';
+    }
+  }
+}
+
+// 70x64 の当たり判定に収まるよう、岩のブロックを組み合わせて描く
+function drawGolem(x, y) {
+  ctx.save();
+  ctx.translate(x, y);
+  const base = '#8b5a2b', dark = '#5c3a1a', light = '#a9743f';
+
+  ctx.fillStyle = dark;
+  ctx.fillRect(18, 46, 12, 18);  // 左脚
+  ctx.fillRect(40, 46, 12, 18);  // 右脚
+  ctx.fillRect(0, 16, 12, 26);   // 左腕
+  ctx.fillRect(58, 16, 12, 26);  // 右腕
+
+  ctx.fillStyle = base;
+  ctx.fillRect(12, 14, 46, 32);  // 胴体
+  ctx.fillRect(23, 0, 24, 16);   // 頭
+  ctx.fillRect(0, 38, 14, 12);   // 左拳
+  ctx.fillRect(56, 38, 14, 12);  // 右拳
+
+  ctx.fillStyle = light;
+  ctx.fillRect(14, 16, 14, 6);   // 胸の岩のハイライト
+  ctx.fillRect(25, 2, 10, 3);
+  ctx.fillRect(2, 18, 6, 8);
+  ctx.fillRect(60, 18, 6, 8);
+
+  ctx.strokeStyle = dark;
+  ctx.lineWidth = 2;
+  ctx.beginPath();               // 岩のひび
+  ctx.moveTo(30, 24); ctx.lineTo(36, 32); ctx.lineTo(33, 40);
+  ctx.moveTo(48, 18); ctx.lineTo(44, 26);
+  ctx.stroke();
+
+  ctx.fillStyle = '#ff3';
+  ctx.fillRect(28, 6, 5, 4);     // 目
+  ctx.fillRect(37, 6, 5, 4);
+  ctx.restore();
+}
+
+function drawPoly(color, pts) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(pts[0], pts[1]);
+  for (let i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i], pts[i + 1]);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// 第二形態。ゴーレムと同じ 70x64 に収まるよう横向きで描く
+function drawCentaur(x, y) {
+  ctx.save();
+  ctx.translate(x, y);
+  const horse = '#7a4a2a', dark = '#4a2c18', skin = '#e0b088';
+
+  drawPoly(dark, [64, 32, 70, 52, 62, 46]);  // 尻尾
+  ctx.fillStyle = dark;
+  for (const lx of [24, 32, 54, 60]) ctx.fillRect(lx, 46, 5, 14);  // 脚
+  ctx.fillStyle = '#222';
+  for (const lx of [24, 32, 54, 60]) ctx.fillRect(lx, 60, 5, 4);   // 蹄
+  ctx.fillStyle = horse;
+  ctx.fillRect(22, 30, 44, 18);  // 馬の胴
+
+  ctx.fillStyle = skin;
+  ctx.fillRect(14, 14, 12, 20);  // 人の上半身
+  ctx.fillRect(15, 2, 10, 11);   // 頭
+  ctx.fillRect(4, 20, 10, 3);    // 弓を持つ腕
+  ctx.fillStyle = '#3a2a1a';
+  ctx.fillRect(15, 0, 10, 4);    // 髪
+  ctx.fillStyle = '#888';
+  ctx.fillRect(14, 16, 12, 10);  // 胸当て
+  ctx.fillStyle = '#000';
+  ctx.fillRect(17, 6, 2, 2);     // 目
+
+  ctx.strokeStyle = '#a0522d';
+  ctx.lineWidth = 2;
+  ctx.beginPath();               // 弓
+  ctx.arc(14, 21, 16, Math.PI * 0.65, Math.PI * 1.35);
+  ctx.stroke();
+  ctx.strokeStyle = '#ddd';
+  ctx.lineWidth = 1;
+  ctx.beginPath();               // 弦
+  ctx.moveTo(14 + 16 * Math.cos(Math.PI * 0.65), 21 + 16 * Math.sin(Math.PI * 0.65));
+  ctx.lineTo(14 + 16 * Math.cos(Math.PI * 1.35), 21 + 16 * Math.sin(Math.PI * 1.35));
+  ctx.stroke();
+  ctx.restore();
+}
+
+// 第三形態。プレイヤーを見下ろす正面向きで描く
+function drawDragon(x, y) {
+  ctx.save();
+  ctx.translate(x, y);
+  const scale = '#b22', wing = '#6b1a1a';
+
+  drawPoly(wing, [22, 20, 0, 4, 4, 20, 0, 34, 22, 34]);     // 左翼
+  drawPoly(wing, [48, 20, 70, 4, 66, 20, 70, 34, 48, 34]);  // 右翼
+  drawPoly(scale, [30, 48, 40, 48, 35, 64]);               // 尻尾
+  ctx.fillStyle = scale;
+  ctx.fillRect(18, 42, 7, 12);   // 左脚
+  ctx.fillRect(45, 42, 7, 12);   // 右脚
+  ctx.fillRect(20, 16, 30, 34);  // 胴体
+  ctx.fillRect(24, 4, 22, 16);   // 頭
+  ctx.fillStyle = '#e8b04a';
+  ctx.fillRect(28, 24, 14, 22);  // 腹
+  drawPoly('#eee', [26, 6, 22, 0, 30, 4]);  // 角
+  drawPoly('#eee', [44, 6, 48, 0, 40, 4]);
+  ctx.fillStyle = '#ff3';
+  ctx.fillRect(28, 9, 5, 3);     // 目
+  ctx.fillRect(37, 9, 5, 3);
+  ctx.fillStyle = '#300';
+  ctx.fillRect(31, 16, 2, 2);    // 鼻
+  ctx.fillRect(37, 16, 2, 2);
+  ctx.restore();
+}
+
+// 3形態とも 40x40 の当たり判定に収まるよう、機首を上に向けて描く
+function drawFighter(x, y, form) {
+  ctx.save();
+  ctx.translate(x, y);
+  if (form === 1) {
+    drawPoly('#f80', [16, 34, 20, 40, 24, 34]);                          // 噴射炎
+    drawPoly('#2a6fb0', [20, 12, 0, 28, 0, 32, 20, 26, 40, 32, 40, 28]); // 主翼
+    drawPoly('#2a6fb0', [20, 26, 10, 36, 30, 36]);                       // 尾翼
+    drawPoly('#5ab0ff', [20, 0, 25, 10, 25, 34, 15, 34, 15, 10]);        // 胴体
+  } else if (form === 2) {
+    drawPoly('#f80', [10, 34, 13, 40, 16, 34]);                          // 噴射炎
+    drawPoly('#f80', [24, 34, 27, 40, 30, 34]);
+    drawPoly('#2a8a3a', [20, 10, 2, 24, 2, 30, 38, 30, 38, 24]);         // 主翼
+    ctx.fillStyle = '#888';
+    ctx.fillRect(2, 14, 3, 12);                                          // 翼端の砲
+    ctx.fillRect(35, 14, 3, 12);
+    ctx.fillStyle = '#3c3';
+    ctx.fillRect(9, 16, 8, 18);                                          // エンジン
+    ctx.fillRect(23, 16, 8, 18);
+    drawPoly('#6e6', [20, 0, 24, 8, 24, 30, 16, 30, 16, 8]);             // 胴体
+  } else {
+    drawPoly('#f80', [14, 34, 20, 40, 26, 34]);                          // 噴射炎
+    drawPoly('#b8860b', [20, 2, 0, 36, 40, 36]);                         // デルタ翼
+    drawPoly('#daa520', [20, 10, 12, 18, 28, 18]);                       // カナード
+    drawPoly('#ffd700', [20, 0, 24, 8, 24, 36, 16, 36, 16, 8]);          // 胴体
+  }
+  drawPoly('#cff', [20, 8, 22, 12, 22, 18, 18, 18, 18, 12]);             // コックピット
+  ctx.restore();
+}
+
+// 単発の連打で光がちらつかないよう、少し押し続けてから表示する
+function drawChargeGlow(p) {
+  if (!p.chargeStart) return;
+  const elapsed = performance.now() - p.chargeStart;
+  if (elapsed < 150) return;
+  const charged = elapsed >= CHARGE_MS;
+  const r = charged ? 8 + Math.sin(elapsed / 60) * 2 : 2 + 6 * elapsed / CHARGE_MS;
+  ctx.fillStyle = charged ? '#0ff' : '#8ff';
+  ctx.beginPath();
+  ctx.arc(p.x + p.w / 2, p.y - 4, r, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawLifeGauge(x, y, unit) {
+  const w = W - x - 10, h = 10;
+  const rate = Math.max(0, unit.hp) / unit.maxHp;
+  ctx.fillStyle = '#333';
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = rate > 0.5 ? '#3c3' : rate > 0.25 ? '#ec3' : '#e33';
+  ctx.fillRect(x, y, w * rate, h);
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x, y, w, h);
+}
+
+function drawBarrier(u, r, fill, stroke) {
+  ctx.save();
+  ctx.globalAlpha = 0.35;
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  ctx.arc(u.x + u.w / 2, u.y + u.h / 2, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function draw() {
+  const { player: p, enemy: e } = state;
+  ctx.clearRect(0, 0, W, H);
+
+  drawFighter(p.x, p.y, p.form);
+  drawChargeGlow(p);
+  if (p.barrier) drawBarrier(p, BARRIER_R, '#6cf', '#aef');
+  [drawGolem, drawCentaur, drawDragon][e.form - 1](e.x, e.y);
+  if (enemyBarrierActive(e)) drawBarrier(e, ENEMY_BARRIER_R, '#f44', '#fa8');
+
+  for (const b of state.playerBeams) {
+    ctx.fillStyle = b.special ? '#fff' : b.reflected ? '#f6f' : b.dmg > 1 ? '#0ff' : '#ff0';
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+  }
+  for (const b of state.enemyBeams) {
+    ctx.fillStyle = b.reflected ? '#f22' : '#f80';
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+  }
+
+  ctx.fillStyle = '#fff';
+  ctx.font = '14px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('ENEMY', 10, 18);
+  drawLifeGauge(70, 8, e);
+  ctx.fillText('PLAYER', 10, H - 6);
+  drawLifeGauge(70, H - 16, p);
+  if (canSpecial(p)) {
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'right';
+    ctx.fillText('↑ SPECIAL READY', W - 10, H - 24);
+  }
+
+  if (state.over) {
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 32px sans-serif';
+    ctx.fillText(state.over, W / 2, H / 2);
+    ctx.font = '16px sans-serif';
+    ctx.fillText('R でリスタート', W / 2, H / 2 + 30);
+  }
+}
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+reset();
+loop();
+</script>
+</body>
+</html>
