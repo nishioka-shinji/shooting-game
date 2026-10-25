@@ -89,18 +89,21 @@ function update() {
 
   if (keys.ArrowLeft) p.x -= 5;
   if (keys.ArrowRight) p.x += 5;
+  if (keys.ArrowUp) p.y -= 5;
+  if (keys.ArrowDown) p.y += 5;
   p.x = Math.max(0, Math.min(W - p.w, p.x));
+  p.y = Math.max(0, Math.min(H - p.h, p.y));
 
   // バリア解除時に Space 押しっぱなしで暴発しないよう、押した瞬間だけを発射の契機にする
   const spacePressed = keys.Space && !p.spacePrev;
   p.spacePrev = keys.Space;
-  p.barrier = !!keys.ArrowDown;
-  const upPressed = keys.ArrowUp && !p.upPrev;
-  p.upPrev = keys.ArrowUp;
+  p.barrier = !!keys.KeyZ;
+  const specialPressed = keys.KeyX && !p.specialPrev;
+  p.specialPrev = keys.KeyX;
   if (p.barrier) {
     p.chargeStart = 0;
   } else {
-    if (upPressed && canSpecial(p)) {
+    if (specialPressed && canSpecial(p)) {
       state.playerBeams.push({ x: p.x + p.w / 2 - 12, y: p.y - 60, w: 24, h: 60, vy: -12, dmg: SPECIAL_DAMAGE, special: true });
       p.specialUsed = true;
       playHit(300);
@@ -360,7 +363,7 @@ function draw() {
   if (canSpecial(p)) {
     ctx.fillStyle = '#fff';
     ctx.textAlign = 'right';
-    ctx.fillText('↑ SPECIAL READY', W - 10, H - 24);
+    ctx.fillText('X: SPECIAL READY', W - 10, H - 24);
   }
 
   if (state.over) {
