@@ -44,7 +44,7 @@ addEventListener('keyup', e => { keys[e.code] = false; });
 let state;
 function reset() {
   state = {
-    player: { x: W / 2 - 20, y: H - 60, w: 40, h: 40, hp: 5, maxHp: 5, form: 1, chargeStart: 0 },
+    player: { x: W / 2 - 20, y: H - 60, w: 40, h: 40, hp: 5, maxHp: 5, chargeStart: 0 },
     enemy: { x: W / 2 - 35, y: 30, w: 70, h: 64, hp: 20, maxHp: 20, form: 1, vx: 2, turnTimer: 0, barrierUntil: 0 },
     playerBeams: [],
     enemyBeams: [],
@@ -164,13 +164,7 @@ function update() {
       state.over = 'YOU WIN';
     }
   } else if (p.hp <= 0) {
-    if (p.form < 3) {
-      p.form++;
-      p.hp = p.maxHp;
-      state.enemyBeams = [];
-    } else {
-      state.over = 'GAME OVER';
-    }
+    state.over = 'GAME OVER';
   }
 }
 
@@ -286,33 +280,15 @@ function drawDragon(x, y) {
   ctx.restore();
 }
 
-// 3形態とも 40x40 の当たり判定に収まるよう、機首を上に向けて描く
-function drawFighter(x, y, form) {
+// 40x40 の当たり判定に収まるよう、機首を上に向けて描く
+function drawFighter(x, y) {
   ctx.save();
   ctx.translate(x, y);
-  if (form === 1) {
-    drawPoly('#f80', [16, 34, 20, 40, 24, 34]);                          // 噴射炎
-    drawPoly('#2a6fb0', [20, 12, 0, 28, 0, 32, 20, 26, 40, 32, 40, 28]); // 主翼
-    drawPoly('#2a6fb0', [20, 26, 10, 36, 30, 36]);                       // 尾翼
-    drawPoly('#5ab0ff', [20, 0, 25, 10, 25, 34, 15, 34, 15, 10]);        // 胴体
-  } else if (form === 2) {
-    drawPoly('#f80', [10, 34, 13, 40, 16, 34]);                          // 噴射炎
-    drawPoly('#f80', [24, 34, 27, 40, 30, 34]);
-    drawPoly('#2a8a3a', [20, 10, 2, 24, 2, 30, 38, 30, 38, 24]);         // 主翼
-    ctx.fillStyle = '#888';
-    ctx.fillRect(2, 14, 3, 12);                                          // 翼端の砲
-    ctx.fillRect(35, 14, 3, 12);
-    ctx.fillStyle = '#3c3';
-    ctx.fillRect(9, 16, 8, 18);                                          // エンジン
-    ctx.fillRect(23, 16, 8, 18);
-    drawPoly('#6e6', [20, 0, 24, 8, 24, 30, 16, 30, 16, 8]);             // 胴体
-  } else {
-    drawPoly('#f80', [14, 34, 20, 40, 26, 34]);                          // 噴射炎
-    drawPoly('#b8860b', [20, 2, 0, 36, 40, 36]);                         // デルタ翼
-    drawPoly('#daa520', [20, 10, 12, 18, 28, 18]);                       // カナード
-    drawPoly('#ffd700', [20, 0, 24, 8, 24, 36, 16, 36, 16, 8]);          // 胴体
-  }
-  drawPoly('#cff', [20, 8, 22, 12, 22, 18, 18, 18, 18, 12]);             // コックピット
+  drawPoly('#f80', [16, 34, 20, 40, 24, 34]);                          // 噴射炎
+  drawPoly('#2a6fb0', [20, 12, 0, 28, 0, 32, 20, 26, 40, 32, 40, 28]); // 主翼
+  drawPoly('#2a6fb0', [20, 26, 10, 36, 30, 36]);                       // 尾翼
+  drawPoly('#5ab0ff', [20, 0, 25, 10, 25, 34, 15, 34, 15, 10]);        // 胴体
+  drawPoly('#cff', [20, 8, 22, 12, 22, 18, 18, 18, 18, 12]);           // コックピット
   ctx.restore();
 }
 
@@ -359,7 +335,7 @@ function draw() {
   const { player: p, enemy: e } = state;
   ctx.clearRect(0, 0, W, H);
 
-  drawFighter(p.x, p.y, p.form);
+  drawFighter(p.x, p.y);
   drawChargeGlow(p);
   if (p.barrier) drawBarrier(p, BARRIER_R, '#6cf', '#aef');
   [drawGolem, drawCentaur, drawDragon][e.form - 1](e.x, e.y);
